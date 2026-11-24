@@ -27,7 +27,16 @@ import {
   Clock,
   X,
   ListFilter,
-  Eye
+  Eye,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  List,
+  ListOrdered,
+  Quote,
+  Undo,
+  Redo
 } from 'lucide-react';
 
 interface NewsFormProps {
@@ -94,6 +103,204 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Rich Text Editor & Image Insert Modal state
+  const [isSourceMode, setIsSourceMode] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalImageUrl, setModalImageUrl] = useState('');
+  const [modalCaption, setModalCaption] = useState('');
+  const [modalAltText, setModalAltText] = useState('');
+  const [modalUploading, setModalUploading] = useState(false);
+  const [modalError, setModalError] = useState('');
+  const [savedRange, setSavedRange] = useState<Range | null>(null);
+  const editorRef = React.useRef<HTMLDivElement>(null);
+
+  // Sync editor innerHTML when contentBody changes externally
+  useEffect(() => {
+    if (editorRef.current && !isSourceMode) {
+      if (editorRef.current.innerHTML !== contentBody) {
+        editorRef.current.innerHTML = contentBody || '';
+      }
+    }
+  }, [contentBody, isSourceMode]);
+
+  const handleEditorInput = () => {
+    if (editorRef.current) {
+      setContentBody(editorRef.current.innerHTML);
+    }
+  };
+
+  const saveSelection = () => {
+    if (typeof window === 'undefined') return;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      setSavedRange(sel.getRangeAt(0));
+    } else {
+      setSavedRange(null);
+    }
+  };
+
+  const restoreSelection = () => {
+    if (typeof window === 'undefined') return;
+    const sel = window.getSelection();
+    if (sel && savedRange) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    }
+  };
+
+  const executeCmd = (command: string, value: string | undefined = undefined) => {
+    if (isSourceMode) return;
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+    document.execCommand(command, false, value);
+    if (editorRef.current) {
+      setContentBody(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleAutoAlignTypography = () => {
+    if (!contentBody) return;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(contentBody, 'text/html');
+
+      // Inspect all images in article and ensure NO CROPPING (natural fit)
+      const imgs = doc.querySelectorAll('img');
+      imgs.forEach((img) => {
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.maxHeight = '600px';
+        img.style.objectFit = 'contain';
+        img.style.display = 'block';
+        img.style.margin = '0 auto';
+        img.removeAttribute('height'); // remove hardcoded height attributes that stretch/crop
+        img.classList.add('rounded-xl', 'shadow-sm');
+
+        // If img is not in a figure, wrap it nicely
+        if (img.parentElement?.tagName.toLowerCase() !== 'div' && img.parentElement?.tagName.toLowerCase() !== 'figure') {
+          const figure = doc.createElement('figure');
+          figure.className = 'my-6 text-center mx-auto';
+          figure.style.maxWidth = '100%';
+          img.parentNode?.insertBefore(figure, img);
+          figure.appendChild(img);
+        }
+      });
+
+      // Clean up empty paragraphs & typography
+      const ps = doc.querySelectorAll('p');
+      ps.forEach((p) => {
+        if (!p.textContent?.trim() && !p.querySelector('img')) {
+          p.remove();
+        } else if (p.innerHTML) {
+          p.innerHTML = p.innerHTML
+            .replace(/\s{2,}/g, ' ')
+            .replace(/“|”/g, '"')
+            .replace(/‘|’/g, "'");
+        }
+      });
+
+      const newHtml = doc.body.innerHTML;
+      setContentBody(newHtml);
+      if (editorRef.current) {
+        editorRef.current.innerHTML = newHtml;
+      }
+      setSuccess('Typography & images auto-aligned! All embedded images formatted for full fit without cropping.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      console.error('Auto-align error:', e);
+    }
+  };
+
+  const handleModalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setModalError('Please upload a valid image file (JPG, PNG, WebP).');
+      return;
+    }
+
+    setModalUploading(true);
+    setModalError('');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setModalImageUrl(data.url);
+        if (!modalAltText) {
+          setModalAltText(title ? `${title} - Image` : file.name.split('.')[0].replace(/[_-]/g, ' '));
+        }
+      } else {
+        setModalError(data.error || 'Failed to upload image.');
+      }
+    } catch (err) {
+      setModalError('Network error uploading image.');
+    } finally {
+      setModalUploading(false);
+    }
+  };
+
+  const handleInsertImageIntoArticle = () => {
+    if (!modalImageUrl.trim()) {
+      setModalError('Please provide or upload an image first.');
+      return;
+    }
+
+    const cleanAlt = modalAltText.trim() || title.trim() || 'Article image';
+    const cleanCaption = modalCaption.trim();
+
+    // The HTML markup engineered specifically so TALL and WIDE images fit without ANY cropping:
+    const figureHtml = `<figure class="my-6 text-center mx-auto" style="max-width: 100%;"><div class="relative inline-block max-w-full rounded-xl overflow-hidden shadow-sm border border-slate-200 bg-slate-50"><img src="${modalImageUrl.trim()}" alt="${cleanAlt}" class="max-w-full h-auto object-contain mx-auto block rounded-xl" style="max-height: 600px; width: auto; display: block; margin: 0 auto; object-fit: contain;" loading="lazy" /></div>${cleanCaption ? `<figcaption class="mt-2 text-xs text-slate-500 italic text-center font-medium">${cleanCaption}</figcaption>` : ''}</figure><p><br></p>`;
+
+    if (isSourceMode) {
+      setContentBody((prev) => (prev ? prev + '\n' + figureHtml : figureHtml));
+    } else if (editorRef.current) {
+      editorRef.current.focus();
+      restoreSelection();
+
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editorRef.current.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = figureHtml;
+        const frag = document.createDocumentFragment();
+        let node;
+        let lastNode;
+        while ((node = tempDiv.firstChild)) {
+          lastNode = frag.appendChild(node);
+        }
+        range.insertNode(frag);
+        if (lastNode) {
+          range.setStartAfter(lastNode);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } else {
+        editorRef.current.innerHTML += figureHtml;
+      }
+      setContentBody(editorRef.current.innerHTML);
+    } else {
+      setContentBody((prev) => (prev ? prev + '\n\n' + figureHtml : figureHtml));
+    }
+
+    setShowImageModal(false);
+    setModalImageUrl('');
+    setModalCaption('');
+    setModalAltText('');
+    setModalError('');
+    setSavedRange(null);
+  };
 
   useEffect(() => {
     fetchCategories();
@@ -458,11 +665,34 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
       return;
     }
 
-    // Split paragraphs cleanly by double newlines or single newlines
-    const formattedParagraphs = contentBody
-      .split(/\n\s*\n|\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
+    // Format structured blocks (paragraphs, figures, headings) cleanly
+    let formattedParagraphs: string[] = [];
+    if (/<[a-z][\s\S]*>/i.test(contentBody)) {
+      if (typeof window !== 'undefined') {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(contentBody, 'text/html');
+        const nodes = Array.from(doc.body.childNodes);
+        nodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as HTMLElement;
+            const outer = el.outerHTML.trim();
+            if (el.tagName.toLowerCase() === 'p' && !el.textContent?.trim() && !el.querySelector('img')) {
+              return;
+            }
+            if (outer) formattedParagraphs.push(outer);
+          } else if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+            formattedParagraphs.push(`<p>${node.textContent.trim()}</p>`);
+          }
+        });
+      }
+    }
+    if (formattedParagraphs.length === 0) {
+      formattedParagraphs = contentBody
+        .split(/\n\s*\n|\n/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+        .map((p) => (p.startsWith('<') ? p : `<p>${p}</p>`));
+    }
 
     setSubmitting(true);
 
@@ -1026,28 +1256,192 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
           </p>
         </div>
 
-        {/* Unified Full Article Content Box */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
+        {/* Unified Full Article Content Box with Rich Text Editor */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
             <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
               <FileText className="w-3.5 h-3.5 text-red-600" />
-              <span>Full Article Body (Structured Content) *</span>
+              <span>Full Article Content (Rich Text Editor) *</span>
             </label>
-            <span className="text-[11px] text-slate-400 font-mono">
-              {contentBody ? contentBody.split(/\n\s*\n|\n/).filter(p => p.trim()).length : 0} paragraphs
-            </span>
+            <div className="flex items-center space-x-3">
+              <span className="text-[11px] text-slate-400 font-mono">
+                {contentBody ? contentBody.replace(/<[^>]*>/g, '').trim().split(/\s+/).filter(Boolean).length : 0} words
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSourceMode(!isSourceMode)}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition flex items-center space-x-1 ${
+                  isSourceMode
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+                title="Toggle between HTML Source Code and Rich Text Visual Editor"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>{isSourceMode ? 'Visual Editor' : 'Raw Source Code'}</span>
+              </button>
+            </div>
           </div>
 
-          <textarea
-            required
-            rows={14}
-            value={contentBody}
-            onChange={(e) => setContentBody(e.target.value)}
-            placeholder="Complete structured article content. Separate paragraphs with blank lines (Enter twice)..."
-            className="w-full border border-slate-300 rounded-xl p-4 text-sm text-slate-900 leading-relaxed focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 font-sans font-normal resize-y shadow-inner"
-          />
-          <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1.5">
-            <span>💡 Separate paragraphs with double Enter / blank lines. Each paragraph will be formatted cleanly in the live website reader.</span>
+          {/* Editor Container with Toolbar */}
+          <div className="border border-slate-300 rounded-xl overflow-hidden bg-white shadow-2xs focus-within:border-red-500 focus-within:ring-1 focus-within:ring-red-500 transition">
+            {/* Toolbar */}
+            <div className="bg-slate-50 border-b border-slate-200 p-2 flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => executeCmd('formatBlock', '<h2>')}
+                className="px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Heading 2"
+              >
+                H2
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('formatBlock', '<h3>')}
+                className="px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Heading 3"
+              >
+                H3
+              </button>
+              <span className="w-px h-5 bg-slate-300 mx-1 self-center" />
+
+              <button
+                type="button"
+                onClick={() => executeCmd('bold')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Bold (Ctrl+B)"
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('italic')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Italic (Ctrl+I)"
+              >
+                <Italic className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('underline')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Underline (Ctrl+U)"
+              >
+                <Underline className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('strikeThrough')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Strikethrough"
+              >
+                <Strikethrough className="w-3.5 h-3.5" />
+              </button>
+              <span className="w-px h-5 bg-slate-300 mx-1 self-center" />
+
+              <button
+                type="button"
+                onClick={() => executeCmd('insertUnorderedList')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Bullet List"
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('insertOrderedList')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Numbered List"
+              >
+                <ListOrdered className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('formatBlock', '<blockquote>')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Quote"
+              >
+                <Quote className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = prompt('Enter link URL:');
+                  if (url) executeCmd('createLink', url);
+                }}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Insert Link"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+              </button>
+              <span className="w-px h-5 bg-slate-300 mx-1 self-center" />
+
+              <button
+                type="button"
+                onClick={() => executeCmd('undo')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Undo"
+              >
+                <Undo className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCmd('redo')}
+                className="p-1.5 text-slate-700 hover:bg-slate-200 rounded transition cursor-pointer"
+                title="Redo"
+              >
+                <Redo className="w-3.5 h-3.5" />
+              </button>
+              <span className="w-px h-5 bg-slate-300 mx-1 self-center" />
+
+              {/* Insert Image Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  saveSelection();
+                  setShowImageModal(true);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition flex items-center space-x-1.5 shadow-2xs hover:shadow-xs cursor-pointer"
+                title="Insert photo or illustration anywhere in article"
+              >
+                <ImageIcon className="w-3.5 h-3.5 text-red-600" />
+                <span>Insert image</span>
+              </button>
+
+              {/* Auto-Align Typography Button */}
+              <button
+                type="button"
+                onClick={handleAutoAlignTypography}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-2xs transition flex items-center space-x-1.5 cursor-pointer"
+                title="Auto-align typography, spacing, and ensure all embedded images fit without cropping"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Auto-Align Typography</span>
+              </button>
+            </div>
+
+            {/* Visual or Source Editor Area */}
+            {isSourceMode ? (
+              <textarea
+                rows={14}
+                value={contentBody}
+                onChange={(e) => setContentBody(e.target.value)}
+                placeholder="Edit raw HTML source code here..."
+                className="w-full p-4 text-xs font-mono text-slate-900 bg-slate-50/50 leading-relaxed focus:outline-none resize-y min-h-[350px]"
+              />
+            ) : (
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={handleEditorInput}
+                onBlur={handleEditorInput}
+                className="article-rich-editor p-4 min-h-[350px] max-h-[750px] overflow-y-auto text-sm text-slate-900 leading-relaxed font-sans bg-white focus:outline-none"
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+            <span>💡 Press <strong>Insert image</strong> to embed photos anywhere in your story. Tall portrait and wide landscape images will automatically fit with zero cropping.</span>
           </p>
         </div>
 
@@ -1295,6 +1689,182 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
           </button>
         </div>
       </form>
+
+      {/* INSERT IMAGE INTO ARTICLE CONTENT MODAL */}
+      {showImageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-xl bg-red-50 text-red-600 border border-red-100">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Insert Image into Article Content
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Embed photo with optional caption anywhere in your story
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImageModal(false);
+                  setModalError('');
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-slate-900">
+              {modalError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{modalError}</span>
+                </div>
+              )}
+
+              {/* Option 1: Upload from Computer */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  OPTION 1: UPLOAD FROM COMPUTER
+                </label>
+                <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-slate-300 hover:border-red-400 rounded-xl cursor-pointer bg-slate-50/50 hover:bg-red-50/30 transition group">
+                  <Upload className="w-6 h-6 text-slate-400 group-hover:text-red-500 transition mb-2" />
+                  <span className="text-xs font-semibold text-slate-700 group-hover:text-red-600">
+                    {modalUploading ? 'Uploading Local Image...' : 'Choose Image File (JPG, PNG, WebP)'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">
+                    Images will be stored in public/uploads and fit without cropping
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleModalImageUpload}
+                    disabled={modalUploading}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {/* Divider */}
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-3 text-[11px] font-bold text-slate-400 uppercase">OR</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              {/* Option 2: Image URL / Uploaded Path */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  OPTION 2: IMAGE URL / UPLOADED PATH
+                </label>
+                <input
+                  type="text"
+                  value={modalImageUrl}
+                  onChange={(e) => setModalImageUrl(e.target.value)}
+                  placeholder="/uploads/upload_... or https://example.com/image.jpg"
+                  className="w-full border border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-red-500 font-mono"
+                />
+              </div>
+
+              {/* Preview Box - Natural Proportion / Zero Cropping */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    PREVIEW
+                  </label>
+                  {modalImageUrl && (
+                    <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Full Fit: Natural Proportions (No Cropping)
+                    </span>
+                  )}
+                </div>
+                <div className="relative rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex flex-col items-center justify-center min-h-[160px] max-h-[340px] overflow-hidden">
+                  {modalImageUrl ? (
+                    <div className="w-full flex flex-col items-center justify-center">
+                      <img
+                        src={modalImageUrl}
+                        alt="Preview"
+                        className="max-h-[260px] w-auto max-w-full object-contain rounded-lg shadow-sm border border-slate-200 bg-white"
+                        onError={() => setModalError('Could not load image preview from provided URL.')}
+                      />
+                      <span className="mt-2 text-[10px] text-slate-500 font-medium">
+                        ✓ Preserves natural aspect ratio: tall portraits and wide photos will not be cut off.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-slate-400">
+                      <ImageIcon className="w-8 h-8 mx-auto mb-1.5 text-slate-300" />
+                      <p className="text-xs font-medium">Select or upload an image above to see preview</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Properly sized for portrait, square, or landscape without cutting heads or borders
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Image Caption (Optional) */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  IMAGE CAPTION (OPTIONAL)
+                </label>
+                <input
+                  type="text"
+                  value={modalCaption}
+                  onChange={(e) => setModalCaption(e.target.value)}
+                  placeholder="e.g. Finance Minister presenting the budget in Parliament"
+                  className="w-full border border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-red-500 font-sans"
+                />
+              </div>
+
+              {/* Alt Text (SEO / Accessibility) */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  ALT TEXT (SEO / ACCESSIBILITY)
+                </label>
+                <input
+                  type="text"
+                  value={modalAltText}
+                  onChange={(e) => setModalAltText(e.target.value)}
+                  placeholder="Descriptive text for search engines and screen readers"
+                  className="w-full border border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-red-500 font-sans"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end space-x-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImageModal(false);
+                  setModalError('');
+                }}
+                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleInsertImageIntoArticle}
+                disabled={!modalImageUrl || modalUploading}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Insert into Article</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -35,12 +35,17 @@ export async function POST(req: Request) {
     await writeFile(filePath, buffer);
 
     // 2. Also save to Website public/uploads (so website works independently without admin)
-    try {
-      const websiteUploadDir = path.join(process.cwd(), '..', 'abpnews-website', 'public', 'uploads');
-      await mkdir(websiteUploadDir, { recursive: true });
-      await writeFile(path.join(websiteUploadDir, fileName), buffer);
-    } catch (copyErr) {
-      console.warn('Could not dual-write image to website directory:', copyErr);
+    const possibleWebsiteDirs = [
+      path.join(process.cwd(), '..', 'ABPNews', 'public', 'uploads'),
+      path.join(process.cwd(), '..', 'abpnews-website', 'public', 'uploads')
+    ];
+    for (const wDir of possibleWebsiteDirs) {
+      try {
+        await mkdir(wDir, { recursive: true });
+        await writeFile(path.join(wDir, fileName), buffer);
+      } catch (copyErr) {
+        // Ignore fallback copy error if directory doesn't exist
+      }
     }
 
     const publicUrl = `/uploads/${fileName}`;

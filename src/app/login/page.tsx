@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, AlertCircle, ShieldCheck, Newspaper } from 'lucide-react';
+import { Lock, Mail, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -69,15 +69,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Demo Credentials Box */}
-        <div className="mb-6 p-3 bg-slate-800/60 border border-slate-700/60 rounded-lg text-xs text-slate-300">
-          <div className="flex items-center space-x-1.5 font-semibold text-red-400 mb-1">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Default Seed Credentials:</span>
-          </div>
-          <p><span className="text-slate-400">Email:</span> admin@metrotimes.com</p>
-          <p><span className="text-slate-400">Password:</span> admin123</p>
-        </div>
+
 
         {error && (
           <div className="mb-6 p-3 bg-red-950/60 border border-red-800/80 rounded-lg flex items-center space-x-2 text-red-300 text-xs">
