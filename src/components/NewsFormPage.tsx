@@ -364,7 +364,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
         const slug = n.slug || 'news';
         const fallbackTitle = n.metaTitle || `${n.title} | Metrotimes`;
         const fallbackDesc = n.metaDescription || n.summary || '';
-        const fallbackCanonical = n.canonicalUrl || `https://metrotimes.com/news/${slug}`;
+        const fallbackCanonical = n.canonicalUrl ? n.canonicalUrl.replace('metrotimes.com', 'metrotimes.in') : `https://metrotimes.in/news/${slug}`;
         const fallbackKeywords = n.metaKeywords || 'Metrotimes, News, India, Latest Updates';
         const fallbackSchema = n.schemaScript || `<script type="application/ld+json">
 {
@@ -372,7 +372,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
   "@type": "NewsArticle",
   "headline": ${JSON.stringify(n.title || '')},
   "description": ${JSON.stringify(n.summary || '')},
-  "image": [${JSON.stringify(n.image || '')}],
+  "image": [${JSON.stringify(image || 'https://metrotimes.in/logoupdate.png')}],
   "datePublished": ${JSON.stringify(n.publishedDate || new Date().toISOString())},
   "author": {
     "@type": "Person",
@@ -383,7 +383,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
     "name": "Metrotimes",
     "logo": {
       "@type": "ImageObject",
-      "url": "https://metrotimes.com/logo1.png"
+      "url": "https://metrotimes.in/logoupdate.png"
     }
   }
 }
@@ -437,7 +437,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
       .slice(0, 6);
 
     const generatedKeywords = ['Metrotimes', 'News', 'Latest Updates', ...words].join(', ');
-    const generatedCanonical = `https://metrotimes.com/news/${cleanSlug}`;
+    const generatedCanonical = `https://metrotimes.in/news/${cleanSlug}`;
     const generatedMetaTitle = `${cleanTitle} | Metrotimes`;
 
     const generatedSchema = `<script type="application/ld+json">
@@ -446,7 +446,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
   "@type": "NewsArticle",
   "headline": ${JSON.stringify(cleanTitle)},
   "description": ${JSON.stringify(cleanSummary)},
-  "image": [${JSON.stringify(image || 'https://metrotimes.com/logo1.png')}],
+  "image": [${JSON.stringify(image || 'https://metrotimes.in/logoupdate.png')}],
   "datePublished": ${JSON.stringify(publishedDate || new Date().toISOString())},
   "author": {
     "@type": "Person",
@@ -457,7 +457,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
     "name": "Metrotimes",
     "logo": {
       "@type": "ImageObject",
-      "url": "https://metrotimes.com/logo1.png"
+      "url": "https://metrotimes.in/logoupdate.png"
     }
   }
 }
@@ -715,7 +715,14 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
         metaTitle: metaTitle.trim() || `${title.trim()} | Metrotimes`,
         metaDescription: metaDescription.trim() || summary.trim(),
         metaKeywords: metaKeywords.trim(),
-        canonicalUrl: canonicalUrl.trim(),
+        canonicalUrl: canonicalUrl.trim()
+          ? canonicalUrl.trim().replace('metrotimes.com', 'metrotimes.in')
+          : `https://metrotimes.in/news/${title
+              .trim()
+              .toLowerCase()
+              .replace(/[^\w\s-]/g, '')
+              .replace(/[\s_-]+/g, '-')
+              .replace(/^-+|-+$/g, '')}`,
         schemaScript: schemaScript.trim(),
         ogTitle: metaTitle.trim() || `${title.trim()} | Metrotimes`,
         ogDescription: metaDescription.trim() || summary.trim(),
@@ -1550,7 +1557,7 @@ export default function NewsFormPage({ isEdit = false }: NewsFormProps) {
                     type="url"
                     value={canonicalUrl}
                     onChange={(e) => setCanonicalUrl(e.target.value)}
-                    placeholder="https://metrotimes.com/news/article-slug"
+                    placeholder="https://metrotimes.in/news/article-slug"
                     className="w-full border border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-red-500 font-mono"
                   />
                 </div>
